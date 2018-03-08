@@ -52,6 +52,11 @@ static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEV_SIZE]	= { .type = NLA_U64 },
 	[TCMU_ATTR_WRITECACHE]	= { .type = NLA_U8 },
 	[TCMU_ATTR_SUPP_KERN_CMD_REPLY] = { .type = NLA_U8 },
+	[TCMU_ATTR_INITIATOR_NAME]	= { .type = NLA_STRING },
+	[TCMU_ATTR_PR_TYPE]	= { .type = NLA_U32 },
+	[TCMU_ATTR_PR_KEY]	= { .type = NLA_U64 },
+	[TCMU_ATTR_PR_QUERY] = { .type = NLA_U32 },
+	[TCMU_ATTR_CMD_REPLY]	= { .type = NLA_U64 },
 };
 
 static int add_device(struct tcmulib_context *ctx, char *dev_name,
@@ -83,6 +88,28 @@ static struct genl_cmd tcmu_cmds[] = {
 		.c_maxattr	= TCMU_ATTR_MAX,
 		.c_attr_policy	= tcmu_attr_policy,
 	},
+	{
+		.c_id		= TCMU_CMD_PRIN,
+		.c_name		= "PR IN",
+		.c_msg_parser	= handle_netlink,
+		.c_maxattr	= TCMU_ATTR_MAX,
+		.c_attr_policy	= tcmu_attr_policy,
+	},
+	{
+		.c_id		= TCMU_CMD_PROUT,
+		.c_name		= "PR OUT",
+		.c_msg_parser	= handle_netlink,
+		.c_maxattr	= TCMU_ATTR_MAX,
+		.c_attr_policy	= tcmu_attr_policy,
+	},
+    {
+		.c_id		= TCMU_CMD_PR_QUERY,
+		.c_name		= "PR OUT",
+		.c_msg_parser	= handle_netlink,
+		.c_maxattr	= TCMU_ATTR_MAX,
+		.c_attr_policy	= tcmu_attr_policy,
+	},
+
 };
 
 static struct genl_ops tcmu_ops = {
@@ -92,7 +119,7 @@ static struct genl_ops tcmu_ops = {
 };
 
 static int send_netlink_reply(struct tcmulib_context *ctx, int reply_cmd,
-			      uint32_t dev_id, int status)
+			      uint32_t dev_id, int status, uint64_t sense_code)
 {
 	struct nl_sock *sock = ctx->nl_sock;
 	struct nl_msg *msg;
@@ -113,6 +140,10 @@ static int send_netlink_reply(struct tcmulib_context *ctx, int reply_cmd,
 		goto free_msg;
 
 	ret = nla_put_u32(msg, TCMU_ATTR_DEVICE_ID, dev_id);
+	if (ret < 0)
+		goto free_msg;
+
+	ret = nla_put_u64(msg,TCMU_ATTR_CMD_REPLY, sense_code);
 	if (ret < 0)
 		goto free_msg;
 
@@ -202,6 +233,11 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 	struct tcmulib_context *ctx = arg;
 	int ret, reply_cmd, version = info->genlhdr->version;
 	char buf[32];
+	char *initiator_name;
+	uint32_t pr_type;
+	uint64_t res_key;
+	uint64_t sense_code = 0;
+	char *device_name;
 
 	tcmu_dbg("cmd %d. Got header version %d. Supported %d.\n",
 		 cmd->c_id, info->genlhdr->version, TCMU_NL_VERSION);
@@ -236,6 +272,29 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 		reply_cmd = TCMU_CMD_RECONFIG_DEVICE_DONE;
 		ret = reconfig_device(ctx, buf, info);
 		break;
+	case TCMU_CMD_PROUT:
+		tcmu_err("lszhu, WE GOT TCMU_CMD_PROUT command!.\n");
+		reply_cmd = TCMU_CMD_PROUT_DONE;
+		pr_type  = nla_get_u32(info->attrs[TCMU_ATTR_PR_TYPE]);
+		res_key  = nla_get_u64(info->attrs[TCMU_ATTR_PR_KEY]);
+		initiator_name = nla_get_string(info->attrs[TCMU_ATTR_INITIATOR_NAME]);
+		device_name = nla_get_string(info->attrs[TCMU_ATTR_DEVICE]);
+		tcmu_err("lszhu, WE got a key: %x.\n", res_key);
+		tcmu_err("lszhu, pr_type is %d.\n",pr_type);
+		tcmu_err("lszhu, initiator name is %s.\n", initiator_name);
+		tcmu_err("lszhu, WE GOT a DEVICE NAME %s.\n", device_name);
+		ret = 0;
+		break;
+	case TCMU_CMD_PR_QUERY:
+		tcmu_err("lszhu, WE got a PR QUERY command.\n");
+		reply_cmd = TCMU_CMD_PR_QUERY_DONE;
+		pr_type  = nla_get_u32(info->attrs[TCMU_ATTR_PR_TYPE]);
+		res_key  = nla_get_u64(info->attrs[TCMU_ATTR_PR_KEY]);
+		initiator_name = nla_get_string(info->attrs[TCMU_ATTR_INITIATOR_NAME]);
+		device_name = nla_get_string(info->attrs[TCMU_ATTR_DEVICE]);
+		sense_code = TCMU_RESERVATION_CONFLICT;
+		ret = 0;
+		break;
 	default:
 		tcmu_err("Unknown netlink command %d. Netlink header received version %d. libtcmu supports %d\n",
 			 cmd->c_id, version, TCMU_NL_VERSION);
@@ -245,8 +304,9 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 	if (version > 1)
 		ret = send_netlink_reply(ctx, reply_cmd,
 				nla_get_u32(info->attrs[TCMU_ATTR_DEVICE_ID]),
-				ret);
+				ret, sense_code);
 
+	tcmu_err("lszhu, handle_netlink() will return with ret = %d.\n", ret);
 	return ret;
 }
 
