@@ -84,6 +84,20 @@ static struct genl_cmd tcmu_cmds[] = {
 		.c_maxattr	= TCMU_ATTR_MAX,
 		.c_attr_policy	= tcmu_attr_policy,
 	},
+	{
+		.c_id		= TCMU_CMD_GET_PR_INFO,
+		.c_name		= "GET PR_INFO",
+		.c_msg_parser	= handle_netlink,
+		.c_maxattr	= TCMU_ATTR_MAX,
+		.c_attr_policy	= tcmu_attr_policy,
+	},
+	{
+		.c_id		= TCMU_CMD_SET_PR_INFO,
+		.c_name		= "SET PR_INFO",
+		.c_msg_parser	= handle_netlink,
+		.c_maxattr	= TCMU_ATTR_MAX,
+		.c_attr_policy	= tcmu_attr_policy,
+	},
 };
 
 static struct genl_ops tcmu_ops = {
@@ -93,7 +107,7 @@ static struct genl_ops tcmu_ops = {
 };
 
 static int send_netlink_reply(struct tcmulib_context *ctx, int reply_cmd,
-			      uint32_t dev_id, int status)
+			      uint32_t dev_id, int status, char *data)
 {
 	struct nl_sock *sock = ctx->nl_sock;
 	struct nl_msg *msg;
@@ -116,6 +130,12 @@ static int send_netlink_reply(struct tcmulib_context *ctx, int reply_cmd,
 	ret = nla_put_u32(msg, TCMU_ATTR_DEVICE_ID, dev_id);
 	if (ret < 0)
 		goto free_msg;
+
+	if (reply_cmd == TCMU_CMD_GET_PR_INFO_DONE) {
+		ret = nla_put_string(msg, TCMU_ATTR_PR_INFO, data);
+		if (ret < 0)
+			goto free_msg;
+	}
 
 	/* Ignore ack. There is nothing we can do. */
 	ret = nl_send_auto(sock, msg);
@@ -197,12 +217,77 @@ static int reconfig_device(struct tcmulib_context *ctx, char *dev_name,
 	return 0;
 }
 
+
+static int set_pr_info(struct tcmulib_context *ctx, char *dev_name,
+		       struct genl_info *info)
+{
+	struct tcmu_device *dev;
+	int i, ret;
+	char *pr_info_str = NULL;
+
+	dev = lookup_dev_by_name(ctx, dev_name, &i);
+	if (!dev) {
+		tcmu_err("Could not set PR info, device %s: not found.\n",
+			 dev_name);
+		return -ENODEV;
+	}
+
+	if (!dev->handler->set_pr_info) {
+		tcmu_dev_err(dev, "Setting PR info is not supported with this device.\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (info->attrs[TCMU_ATTR_PR_INFO]) {
+		pr_info_str = nla_get_string(info->attrs[TCMU_ATTR_PR_INFO]);
+	}
+	else {
+		tcmu_dev_err(dev, "Failed to obtain PR info from netlink.\n");
+		return -ENODATA;
+	}
+
+	ret = dev->handler->set_pr_info(dev, pr_info_str);
+	if (ret < 0) {
+		tcmu_dev_err(dev, "Failed to store PR info with error %d.\n",
+			     ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int get_pr_info(struct tcmulib_context *ctx, char *dev_name, char **buf)
+{
+	struct tcmu_device *dev;
+	int i, ret;
+
+	dev = lookup_dev_by_name(ctx, dev_name, &i);
+	if (!dev) {
+		tcmu_err("Could not get PR info, device %s: not found.\n", dev_name);
+		return -ENODEV;
+	}
+
+	if (!dev->handler->get_pr_info) {
+		tcmu_dev_err(dev, "Getting PR info is not supported with this device.\n");
+		return -EOPNOTSUPP;
+	}
+
+
+	ret = dev->handler->get_pr_info(dev, buf);
+	if (ret < 0) {
+		tcmu_dev_err(dev, "Failed to get PR info with error %d.\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 			  struct genl_info *info, void *arg)
 {
 	struct tcmulib_context *ctx = arg;
 	int ret, reply_cmd, version = info->genlhdr->version;
 	char buf[32];
+	char *data = NULL;
 
 	tcmu_dbg("cmd %d. Got header version %d. Supported %d.\n",
 		 cmd->c_id, info->genlhdr->version, TCMU_NL_VERSION);
@@ -237,6 +322,15 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 		reply_cmd = TCMU_CMD_RECONFIG_DEVICE_DONE;
 		ret = reconfig_device(ctx, buf, info);
 		break;
+	case TCMU_CMD_GET_PR_INFO:
+		reply_cmd = TCMU_CMD_GET_PR_INFO_DONE;
+		ret = get_pr_info(ctx, buf, &data);
+		break;
+	case TCMU_CMD_SET_PR_INFO:
+		reply_cmd = TCMU_CMD_SET_PR_INFO_DONE;
+		ret = set_pr_info(ctx, buf, info);
+		break;
+
 	default:
 		tcmu_err("Unknown netlink command %d. Netlink header received version %d. libtcmu supports %d\n",
 			 cmd->c_id, version, TCMU_NL_VERSION);
@@ -246,7 +340,7 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 	if (version > 1)
 		ret = send_netlink_reply(ctx, reply_cmd,
 				nla_get_u32(info->attrs[TCMU_ATTR_DEVICE_ID]),
-				ret);
+				ret, data);
 
 	return ret;
 }

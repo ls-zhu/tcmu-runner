@@ -4,7 +4,7 @@
 /* This header will be used by application too */
 
 #include <linux/types.h>
-#include <linux/uio.h>
+//#include <linux/uio.h>
 
 #define TCMU_VERSION "2.0"
 
@@ -131,9 +131,13 @@ enum tcmu_genl_cmd {
 	TCMU_CMD_ADDED_DEVICE,
 	TCMU_CMD_REMOVED_DEVICE,
 	TCMU_CMD_RECONFIG_DEVICE,
+	TCMU_CMD_GET_PR_INFO,
+	TCMU_CMD_SET_PR_INFO,
 	TCMU_CMD_ADDED_DEVICE_DONE,
 	TCMU_CMD_REMOVED_DEVICE_DONE,
 	TCMU_CMD_RECONFIG_DEVICE_DONE,
+	TCMU_CMD_GET_PR_INFO_DONE,
+	TCMU_CMD_SET_PR_INFO_DONE,
 	TCMU_CMD_SET_FEATURES,
 	__TCMU_CMD_MAX,
 };
@@ -150,6 +154,7 @@ enum tcmu_genl_attr {
 	TCMU_ATTR_CMD_STATUS,
 	TCMU_ATTR_DEVICE_ID,
 	TCMU_ATTR_SUPP_KERN_CMD_REPLY,
+	TCMU_ATTR_PR_INFO,
 	__TCMU_ATTR_MAX,
 };
 #define TCMU_ATTR_MAX (__TCMU_ATTR_MAX - 1)

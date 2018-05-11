@@ -78,6 +78,9 @@
 #define TCMU_RBD_LOCKER_TAG_FMT "tcmu_tag=%hu,rbd_client=%s"
 #define TCMU_RBD_LOCKER_BUF_LEN 256
 
+#define TCMU_RBD_PR_INFO_MAX_SIZE	8192
+#define TCMU_PR_INFO_KEY		"pr_info"
+
 struct tcmu_rbd_state {
 	rados_t cluster;
 	rados_ioctx_t io_ctx;
@@ -801,6 +804,36 @@ static int tcmu_rbd_check_image_size(struct tcmu_device *dev, uint64_t new_size)
 	return 0;
 }
 
+static rbd_image_t tcmu_dev_to_image(struct tcmu_device *dev);
+
+static int tcmu_rbd_pr_set(struct tcmu_device *dev, char *buf)
+{
+	int ret = 0;
+
+	rbd_image_t image = tcmu_dev_to_image(dev);
+	ret = rbd_metadata_set(image, TCMU_PR_INFO_KEY, buf);
+
+	return ret;
+}
+
+static int tcmu_rbd_pr_get(struct tcmu_device *dev, char **buf)
+{
+	int ret = 0;
+	size_t len = TCMU_RBD_PR_INFO_MAX_SIZE;
+	rbd_image_t image = tcmu_dev_to_image(dev);
+	char *pr_info_str = malloc(TCMU_RBD_PR_INFO_MAX_SIZE);
+	memset(pr_info_str, 0x0, TCMU_RBD_PR_INFO_MAX_SIZE);
+	if (!pr_info_str) {
+		tcmu_err("Not enough memory for getting PR info.\n");
+		return -ENOMEM;
+	}
+
+	ret = rbd_metadata_get(image, TCMU_PR_INFO_KEY, pr_info_str, &len);
+	*buf = pr_info_str;
+
+	return ret;
+}
+
 static int tcmu_rbd_open(struct tcmu_device *dev, bool reopen)
 {
 	rbd_image_info_t image_info;
@@ -904,6 +937,7 @@ static int tcmu_rbd_open(struct tcmu_device *dev, bool reopen)
 	tcmu_set_dev_write_cache_enabled(dev, 0);
 
 	free(dev_cfg_dup);
+	tcmu_rbd_pr_set(dev, "");
 	return 0;
 
 stop_image:
@@ -1431,6 +1465,8 @@ struct tcmur_handler tcmu_rbd_handler = {
 	.read	       = tcmu_rbd_read,
 	.write	       = tcmu_rbd_write,
 	.reconfig      = tcmu_rbd_reconfig,
+	.set_pr_info   = tcmu_rbd_pr_set,
+	.get_pr_info   = tcmu_rbd_pr_get,
 #ifdef LIBRBD_SUPPORTS_AIO_FLUSH
 	.flush	       = tcmu_rbd_flush,
 #endif

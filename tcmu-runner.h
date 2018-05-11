@@ -133,6 +133,9 @@ struct tcmur_handler {
 	 * indicating success/failure.
 	 */
 	int (*get_lock_tag)(struct tcmu_device *dev, uint16_t *tag);
+	int (*set_pr_info)(struct tcmu_device *dev, char *pr_info);
+	int (*get_pr_info)(struct tcmu_device *dev, char **buf);
+
 
 	/*
 	 * internal field, don't touch this

@@ -76,6 +76,10 @@ struct tcmulib_handler {
 	int (*added)(struct tcmu_device *dev);
 	void (*removed)(struct tcmu_device *dev);
 
+	int (*set_pr_info)(struct tcmu_device *dev, char *pr_info);
+	int (*get_pr_info)(struct tcmu_device *dev, char **buf);
+
+
 	void *hm_private; /* private ptr for handler module */
 	void *connection; /* private, dbus connection for this subtype */
 };
